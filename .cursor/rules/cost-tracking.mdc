@@ -1,0 +1,105 @@
+---
+description: Guidelines for adding and managing LLM provider cost tracking in Helicone
+globs: ["costs/**", "**/costs/**", "**/*cost*"]
+---
+
+# Cost Tracking Guidelines
+
+Helicone tracks token costs for all supported LLM providers. This document outlines the conventions and patterns for adding or updating cost data.
+
+## Directory Structure
+
+```
+costs/
+  src/
+    providers/
+      openai/
+        index.ts        # Model cost definitions
+      anthropic/
+        index.ts
+      google/
+        index.ts
+      ... (other providers)
+    interface.ts        # Shared types and interfaces
+    index.ts            # Aggregated exports
+```
+
+## Cost Entry Format
+
+Each model cost entry must conform to the `ModelRow` interface:
+
+```typescript
+interface ModelRow {
+  model: {
+    operator: "equals" | "startsWith" | "includes";
+    value: string;
+  };
+  cost: {
+    prompt_token: number;   // Cost per prompt token in USD
+    completion_token: number; // Cost per completion token in USD
+  };
+}
+```
+
+## Adding a New Model Cost
+
+1. Locate the appropriate provider file under `costs/src/providers/<provider>/index.ts`
+2. Add a new entry to the provider's cost array
+3. Use the most specific `operator` possible (`equals` > `startsWith` > `includes`)
+4. Costs must be expressed in **USD per single token** (not per 1K tokens)
+
+### Conversion Example
+
+If a provider lists pricing as `$3.00 / 1M tokens`:
+
+```typescript
+// $3.00 / 1,000,000 = 0.000003 per token
+const prompt_token = 3.0 / 1_000_000; // 0.000003
+```
+
+## Operator Selection Rules
+
+| Scenario | Operator |
+|---|---|
+| Exact model name known (e.g., `gpt-4o`) | `equals` |
+| Model family with versioned suffixes (e.g., `gpt-4-turbo-*`) | `startsWith` |
+| Model name appears anywhere in identifier | `includes` |
+
+## Provider Registration
+
+After adding a provider file, register it in `costs/src/index.ts`:
+
+```typescript
+import { costs as openAICosts } from "./providers/openai";
+import { costs as myNewProviderCosts } from "./providers/my-new-provider";
+
+export const costs: ModelRow[] = [
+  ...openAICosts,
+  ...myNewProviderCosts,
+  // order matters — more specific entries should come first
+];
+```
+
+## Testing Cost Entries
+
+- Run `cd costs && npm test` to validate all cost entries
+- Ensure no duplicate model entries exist for the same provider
+- Verify costs are non-negative and non-zero
+- Cross-check against the provider's official pricing page before submitting
+
+## Common Mistakes
+
+- ❌ Using per-1K token pricing directly (must divide by 1000)
+- ❌ Using per-1M token pricing directly (must divide by 1,000,000)
+- ❌ Forgetting to export the new provider in the root `index.ts`
+- ❌ Using `includes` when `equals` or `startsWith` is more appropriate
+- ❌ Adding costs without a source URL in the PR description
+
+## PR Checklist for Cost Updates
+
+- [ ] Costs sourced from official provider pricing page (include URL in PR)
+- [ ] Correct operator used for model matching
+- [ ] Per-token conversion verified
+- [ ] No duplicate entries
+- [ ] Tests pass locally
+- [ ] Provider registered in root `index.ts` (if new provider)
