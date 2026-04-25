@@ -1,0 +1,162 @@
+---
+description: Testing guidelines and best practices for Helicone
+globs: ["**/*.test.ts", "**/*.spec.ts", "**/__tests__/**/*.ts"]
+---
+
+# Helicone Testing Guidelines
+
+## Overview
+
+This document outlines the testing standards and best practices for the Helicone project. All new features and bug fixes should include appropriate test coverage.
+
+## Test File Structure
+
+```
+src/
+  components/
+    MyComponent/
+      MyComponent.tsx
+      MyComponent.test.tsx
+  utils/
+    myUtil.ts
+    myUtil.test.ts
+  __tests__/
+    integration/
+      api.test.ts
+```
+
+## Unit Tests
+
+### Naming Conventions
+- Test files should be co-located with the source file they test
+- Use `.test.ts` or `.spec.ts` suffix
+- Describe blocks should match the module/function name
+- Test names should clearly describe the expected behavior
+
+```typescript
+// Good
+describe('calculateCost', () => {
+  it('should return correct cost for GPT-4 with 1000 tokens', () => {
+    // ...
+  });
+
+  it('should throw an error when model is not found', () => {
+    // ...
+  });
+});
+
+// Avoid
+describe('test calculateCost', () => {
+  it('works', () => {
+    // ...
+  });
+});
+```
+
+### Assertions
+- Prefer specific matchers over generic ones
+- Use `toEqual` for deep equality, `toBe` for primitive equality
+- Always assert on the expected outcome, not just that no error was thrown
+
+```typescript
+// Good
+expect(result.totalCost).toBeCloseTo(0.03, 5);
+expect(response.status).toBe(200);
+expect(error.message).toContain('Model not found');
+
+// Avoid
+expect(result).toBeTruthy();
+expect(() => fn()).not.toThrow();
+```
+
+## Integration Tests
+
+### API Tests
+- Test the full request/response cycle
+- Mock external dependencies (OpenAI, Anthropic, etc.)
+- Use realistic test data that mirrors production scenarios
+
+```typescript
+describe('POST /v1/chat/completions', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('should proxy request to OpenAI and log to Helicone', async () => {
+    const mockResponse = createMockOpenAIResponse();
+    mockOpenAI.mockResolvedValueOnce(mockResponse);
+
+    const response = await request(app)
+      .post('/v1/chat/completions')
+      .set('Authorization', `Bearer ${TEST_API_KEY}`)
+      .send(validChatPayload);
+
+    expect(response.status).toBe(200);
+    expect(mockHeliconeLogger).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'gpt-4' })
+    );
+  });
+});
+```
+
+## Cost Tracking Tests
+
+When adding new model costs (see `.claude/processes/add_new_cost`), always include tests:
+
+```typescript
+describe('Model Cost Calculation', () => {
+  it('should calculate correct cost for new model', () => {
+    const cost = calculateCost({
+      model: 'new-model-name',
+      promptTokens: 1000,
+      completionTokens: 500,
+    });
+
+    // Verify against published pricing
+    expect(cost.promptCost).toBeCloseTo(expectedPromptCost, 6);
+    expect(cost.completionCost).toBeCloseTo(expectedCompletionCost, 6);
+  });
+});
+```
+
+## Mocking Guidelines
+
+### External Services
+- Always mock external API calls in unit and integration tests
+- Use `jest.mock()` for module-level mocks
+- Use `jest.spyOn()` for method-level mocks when you need to verify calls
+
+```typescript
+// Mock entire module
+jest.mock('@/lib/openai-client');
+
+// Spy on specific method
+const logSpy = jest.spyOn(heliconeLogger, 'log');
+```
+
+### Database
+- Use in-memory SQLite or mock the database layer for unit tests
+- Integration tests may use a test database with proper setup/teardown
+
+## Test Coverage Requirements
+
+- New utility functions: **90%+ coverage**
+- API route handlers: **80%+ coverage**
+- React components: **70%+ coverage**
+- Cost calculation logic: **95%+ coverage** (critical path)
+
+## Running Tests
+
+```bash
+# Run all tests
+npm test
+
+# Run with coverage
+npm run test:coverage
+
+# Run specific test file
+npm test -- myUtil.test.ts
+
+# Run tests in watch mode
+npm run test:watch
+```
