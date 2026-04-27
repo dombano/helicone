@@ -1,0 +1,124 @@
+---
+description: Error handling patterns and best practices for Helicone
+globs: ["**/*.ts", "**/*.tsx"]
+---
+
+# Error Handling Guidelines
+
+## Core Principles
+
+Helicone uses a consistent result-based error handling pattern across the codebase to avoid throwing exceptions and to make error states explicit.
+
+## Result Type Pattern
+
+Use the `Result` type for functions that can fail:
+
+```typescript
+type Result<T, E = string> = 
+  | { data: T; error: null }
+  | { data: null; error: E };
+
+// Helper constructors
+const ok = <T>(data: T): Result<T> => ({ data, error: null });
+const err = <E = string>(error: E): Result<never, E> => ({ data: null, error });
+```
+
+### Usage Example
+
+```typescript
+async function fetchModel(modelId: string): Promise<Result<Model>> {
+  try {
+    const model = await db.models.findById(modelId);
+    if (!model) {
+      return err(`Model not found: ${modelId}`);
+    }
+    return ok(model);
+  } catch (e) {
+    return err(`Database error: ${String(e)}`);
+  }
+}
+
+// Consuming the result
+const result = await fetchModel(id);
+if (result.error) {
+  console.error(result.error);
+  return;
+}
+const model = result.data; // TypeScript knows this is Model, not null
+```
+
+## API Error Responses
+
+All API routes should return structured error responses:
+
+```typescript
+// Standard API error shape
+interface APIError {
+  error: string;
+  details?: string;
+  code?: number;
+}
+
+// In Next.js API routes
+export default async function handler(req, res) {
+  const result = await someOperation();
+  if (result.error) {
+    return res.status(400).json({ error: result.error } satisfies APIError);
+  }
+  return res.status(200).json(result.data);
+}
+```
+
+## Error Logging
+
+- Always log errors with sufficient context (request ID, user ID, operation name)
+- Use structured logging — avoid bare `console.log` in production paths
+- Do NOT log sensitive data: API keys, passwords, PII
+
+```typescript
+// Good
+console.error(JSON.stringify({
+  message: "Failed to process request",
+  requestId,
+  operation: "fetchCost",
+  error: result.error,
+}));
+
+// Bad
+console.log("error", e, apiKey); // leaks sensitive data
+```
+
+## Async Error Boundaries
+
+Wrap top-level async operations in try/catch and convert to Result:
+
+```typescript
+async function safeAsync<T>(fn: () => Promise<T>): Promise<Result<T>> {
+  try {
+    return ok(await fn());
+  } catch (e) {
+    return err(e instanceof Error ? e.message : String(e));
+  }
+}
+```
+
+## Client-Side Error Handling
+
+- Use React Error Boundaries for rendering errors
+- Display user-friendly messages — never expose raw error strings to end users
+- Log errors to an observability service (e.g., Sentry) in production
+
+```typescript
+// In components, map internal errors to user-facing messages
+const userMessage = result.error?.includes("not found")
+  ? "The requested resource could not be found."
+  : "Something went wrong. Please try again.";
+```
+
+## Anti-Patterns to Avoid
+
+- ❌ Swallowing errors silently (`catch (e) {}`)
+- ❌ Throwing errors across async boundaries without catching
+- ❌ Using `any` as an error type
+- ❌ Returning `null` ambiguously (use `Result` instead)
+- ❌ Deeply nested try/catch blocks — flatten with early returns
