@@ -1,0 +1,120 @@
+---
+description: Guidelines for structured logging across the Helicone codebase
+globs: ["**/*.ts", "**/*.tsx"]
+---
+
+# Helicone Logging Guidelines
+
+## Overview
+
+Helicone uses structured logging to ensure observability across all services. Follow these guidelines to maintain consistent, queryable, and actionable logs.
+
+## Log Levels
+
+Use the appropriate log level based on the severity and intent:
+
+| Level   | When to Use                                                   |
+|---------|---------------------------------------------------------------|
+| `error` | Unrecoverable errors, exceptions that affect user experience  |
+| `warn`  | Recoverable issues, deprecated usage, unexpected but handled  |
+| `info`  | Key lifecycle events (startup, shutdown, request completed)   |
+| `debug` | Detailed diagnostic info, only relevant during development    |
+| `trace` | Very granular data (e.g., per-token streaming events)         |
+
+## Structured Log Format
+
+All logs MUST be structured JSON objects — never use raw `console.log` strings in production paths.
+
+```typescript
+// ✅ Good
+logger.info({
+  event: "request_completed",
+  requestId: req.id,
+  userId: user.id,
+  durationMs: elapsed,
+  statusCode: res.statusCode,
+});
+
+// ❌ Bad
+console.log(`Request ${req.id} completed in ${elapsed}ms`);
+```
+
+## Required Fields
+
+Every log entry should include:
+
+- `event` — a snake_case identifier describing what happened
+- `requestId` — trace ID for correlating logs across services
+- `service` — the originating service name (e.g., `"worker"`, `"api"`, `"proxy"`)
+- `timestamp` — ISO 8601, usually injected automatically by the logger
+
+Optional but encouraged:
+- `userId` / `orgId` — for user-scoped operations
+- `durationMs` — for any timed operations
+- `error` — serialized error object (use `serializeError(err)` helper)
+
+## Error Logging
+
+Always include the full error context. Use the `serializeError` utility to avoid losing stack traces.
+
+```typescript
+import { serializeError } from "../utils/errors";
+
+try {
+  await processRequest(req);
+} catch (err) {
+  logger.error({
+    event: "request_processing_failed",
+    requestId: req.id,
+    error: serializeError(err),
+  });
+}
+```
+
+Never log raw error objects directly — they may not serialize correctly:
+
+```typescript
+// ❌ Bad — Error object may appear as {}
+logger.error({ error: err });
+```
+
+## Sensitive Data
+
+Never log:
+- API keys or secrets (even partial)
+- Full request/response bodies unless explicitly scrubbed
+- PII (emails, names) unless required and anonymized
+- Auth tokens or session IDs
+
+Use the `redact()` helper for fields that may contain sensitive data:
+
+```typescript
+import { redact } from "../utils/redact";
+
+logger.info({
+  event: "auth_attempt",
+  email: redact(user.email),
+  apiKeyPrefix: apiKey.slice(0, 8) + "...",
+});
+```
+
+## Performance Logging
+
+For operations with latency implications, always log duration:
+
+```typescript
+const start = Date.now();
+await db.query(...);
+logger.debug({
+  event: "db_query_completed",
+  query: "getRequestById",
+  durationMs: Date.now() - start,
+});
+```
+
+## Do Not Use
+
+- `console.log`, `console.error`, `console.warn` in non-script code
+- String interpolation as the primary log message
+- Logging inside tight loops without sampling/rate-limiting
+- Duplicate log entries for the same event at multiple levels
